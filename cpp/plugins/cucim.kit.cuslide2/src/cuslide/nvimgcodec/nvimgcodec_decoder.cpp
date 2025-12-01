@@ -157,12 +157,12 @@ bool decode_ifd_region_nvimgcodec(const IfdInfo& ifd_info,
         #endif
         return false;
     }
-    
+
     #ifdef DEBUG
     fmt::print("🚀 Decoding IFD[{}] region: [{},{}] {}x{}, codec: {}\n",
               ifd_info.index, x, y, width, height, ifd_info.codec);
     #endif
-    
+
     try
     {
         // CRITICAL: Must use the same manager that created main_code_stream!
@@ -175,12 +175,12 @@ bool decode_ifd_region_nvimgcodec(const IfdInfo& ifd_info,
             #endif
             return false;
         }
-        
+
         // Select decoder based on target device
         // CPU-only backend can handle in-bounds ROI decoding for TIFF files
         std::string device_str = std::string(out_device);
         bool target_is_cpu = (device_str.find("cpu") != std::string::npos);
-        
+
         nvimgcodecDecoder_t decoder;
         if (target_is_cpu && manager.has_cpu_decoder())
         {
@@ -196,7 +196,7 @@ bool decode_ifd_region_nvimgcodec(const IfdInfo& ifd_info,
             fmt::print("  💡 Using hybrid decoder for ROI\n");
             #endif
         }
-        
+
         // Step 1: Create view with ROI for this IFD
         nvimgcodecRegion_t region{};
         region.struct_type = NVIMGCODEC_STRUCTURE_TYPE_REGION;
@@ -207,14 +207,14 @@ bool decode_ifd_region_nvimgcodec(const IfdInfo& ifd_info,
         region.start[1] = x;  // col
         region.end[0] = y + height;
         region.end[1] = x + width;
-        
+
         nvimgcodecCodeStreamView_t view{};
         view.struct_type = NVIMGCODEC_STRUCTURE_TYPE_CODE_STREAM_VIEW;
         view.struct_size = sizeof(nvimgcodecCodeStreamView_t);
         view.struct_next = nullptr;
         view.image_idx = ifd_info.index;
         view.region = region;
-        
+
         // Get sub-code stream for this ROI (RAII managed)
         nvimgcodecCodeStream_t roi_stream_raw = nullptr;
         nvimgcodecStatus_t status = nvimgcodecCodeStreamGetSubCodeStream(
@@ -222,7 +222,7 @@ bool decode_ifd_region_nvimgcodec(const IfdInfo& ifd_info,
             &roi_stream_raw,
             &view
         );
-        
+
         if (status != NVIMGCODEC_STATUS_SUCCESS)
         {
             #ifdef DEBUG
@@ -232,7 +232,7 @@ bool decode_ifd_region_nvimgcodec(const IfdInfo& ifd_info,
             return false;
         }
         UniqueCodeStream roi_stream(roi_stream_raw);
-        
+
         // Step 2: Determine buffer kind based on target device and decoder
         nvimgcodecImageBufferKind_t buffer_kind;
         if (target_is_cpu)
@@ -249,7 +249,7 @@ bool decode_ifd_region_nvimgcodec(const IfdInfo& ifd_info,
             int device_count = 0;
             cudaError_t cuda_err = cudaGetDeviceCount(&device_count);
             bool gpu_available = (cuda_err == cudaSuccess && device_count > 0);
-            
+
             if (!gpu_available)
             {
                 // ERROR: User expects GPU buffer but no GPU is available
@@ -260,32 +260,32 @@ bool decode_ifd_region_nvimgcodec(const IfdInfo& ifd_info,
                     "GPU buffer requested for ROI decode but no CUDA device available. "
                     "Use 'cpu' device string for CPU decoding.");
             }
-            
+
             // GPU is available: use device buffer
             buffer_kind = NVIMGCODEC_IMAGE_BUFFER_KIND_STRIDED_DEVICE;
             #ifdef DEBUG
             fmt::print("  ℹ️  Using GPU buffer for ROI decoding\n");
             #endif
         }
-        
+
         // Step 3: Prepare output image info for the region
         nvimgcodecImageInfo_t output_image_info{};
         output_image_info.struct_type = NVIMGCODEC_STRUCTURE_TYPE_IMAGE_INFO;
         output_image_info.struct_size = sizeof(nvimgcodecImageInfo_t);
         output_image_info.struct_next = nullptr;
-        
+
         // Use interleaved RGB format
         output_image_info.sample_format = NVIMGCODEC_SAMPLEFORMAT_I_RGB;
         output_image_info.color_spec = NVIMGCODEC_COLORSPEC_SRGB;
         output_image_info.chroma_subsampling = NVIMGCODEC_SAMPLING_NONE;
         output_image_info.num_planes = 1;
         output_image_info.buffer_kind = buffer_kind;
-        
+
         // Calculate buffer requirements for the region
         uint32_t num_channels = 3;  // RGB
         size_t row_stride = width * num_channels;
         size_t buffer_size = row_stride * height;
-        
+
         output_image_info.plane_info[0].height = height;
         output_image_info.plane_info[0].width = width;
         output_image_info.plane_info[0].num_channels = num_channels;
@@ -293,12 +293,12 @@ bool decode_ifd_region_nvimgcodec(const IfdInfo& ifd_info,
         output_image_info.plane_info[0].sample_type = NVIMGCODEC_SAMPLE_DATA_TYPE_UINT8;
         output_image_info.buffer_size = buffer_size;
         output_image_info.cuda_stream = 0;
-        
+
         #ifdef DEBUG
         fmt::print("  Buffer: {}x{} RGB, stride={}, size={} bytes\n",
                   width, height, row_stride, buffer_size);
         #endif
-        
+
         // Step 4: Allocate output buffer (RAII managed)
         bool use_device_memory = (buffer_kind == NVIMGCODEC_IMAGE_BUFFER_KIND_STRIDED_DEVICE);
         DecodeBuffer decode_buffer;
@@ -312,9 +312,9 @@ bool decode_ifd_region_nvimgcodec(const IfdInfo& ifd_info,
         #ifdef DEBUG
         fmt::print("  Allocated {} buffer\n", use_device_memory ? "GPU" : "CPU");
         #endif
-        
+
         output_image_info.buffer = decode_buffer.get();
-        
+
         // Step 5: Create image object (RAII managed)
         nvimgcodecImage_t image_raw = nullptr;
         status = nvimgcodecImageCreate(
@@ -322,7 +322,7 @@ bool decode_ifd_region_nvimgcodec(const IfdInfo& ifd_info,
             &image_raw,
             &output_image_info
         );
-        
+
         if (status != NVIMGCODEC_STATUS_SUCCESS)
         {
             #ifdef DEBUG
@@ -332,14 +332,14 @@ bool decode_ifd_region_nvimgcodec(const IfdInfo& ifd_info,
             return false;  // RAII handles cleanup
         }
         UniqueImage image(image_raw);
-        
+
         // Step 6: Prepare decode parameters
         nvimgcodecDecodeParams_t decode_params{};
         decode_params.struct_type = NVIMGCODEC_STRUCTURE_TYPE_DECODE_PARAMS;
         decode_params.struct_size = sizeof(nvimgcodecDecodeParams_t);
         decode_params.struct_next = nullptr;
         decode_params.apply_exif_orientation = 1;
-        
+
         // Step 7: Schedule decoding (RAII managed)
         nvimgcodecCodeStream_t roi_stream_ptr = roi_stream.get();
         nvimgcodecImage_t image_ptr = image.get();
@@ -350,7 +350,7 @@ bool decode_ifd_region_nvimgcodec(const IfdInfo& ifd_info,
                                         1,
                                         &decode_params,
                                         &decode_future_raw);
-        
+
         if (status != NVIMGCODEC_STATUS_SUCCESS)
         {
             #ifdef DEBUG
@@ -360,12 +360,12 @@ bool decode_ifd_region_nvimgcodec(const IfdInfo& ifd_info,
             return false;  // RAII handles cleanup
         }
         UniqueFuture decode_future(decode_future_raw);
-        
+
         // Step 8: Wait for completion
         nvimgcodecProcessingStatus_t decode_status = NVIMGCODEC_PROCESSING_STATUS_UNKNOWN;
         size_t status_size = 1;
         status = nvimgcodecFutureGetProcessingStatus(decode_future.get(), &decode_status, &status_size);
-        
+
         if (status != NVIMGCODEC_STATUS_SUCCESS)
         {
             #ifdef DEBUG
@@ -373,12 +373,12 @@ bool decode_ifd_region_nvimgcodec(const IfdInfo& ifd_info,
             #endif
             return false;  // RAII handles cleanup
         }
-        
+
         if (use_device_memory)
         {
             cudaDeviceSynchronize();
         }
-        
+
         // Step 9: Check decode status
         if (decode_status != NVIMGCODEC_PROCESSING_STATUS_SUCCESS)
         {
@@ -387,15 +387,15 @@ bool decode_ifd_region_nvimgcodec(const IfdInfo& ifd_info,
             #endif
             return false;  // RAII handles cleanup
         }
-        
+
         #ifdef DEBUG
         fmt::print("✅ Successfully decoded IFD[{}] region\n", ifd_info.index);
         #endif
-        
+
         // Success: release buffer ownership to caller (RAII cleanup skipped for buffer)
         *output_buffer = reinterpret_cast<uint8_t*>(decode_buffer.release());
         #ifdef DEBUG
-        fmt::print("✅ nvImageCodec ROI decode successful: {}x{} at ({}, {})\n", 
+        fmt::print("✅ nvImageCodec ROI decode successful: {}x{} at ({}, {})\n",
                   width, height, x, y);
         #endif
         return true;  // roi_stream, image, decode_future cleaned up by RAII

@@ -20,7 +20,7 @@ namespace cuslide2::nvimgcodec
 
 /**
  * @brief Singleton manager for nvImageCodec instance and decoder
- * 
+ *
  * Provides centralized access to nvImageCodec resources with thread-safe initialization.
  */
 class NvImageCodecManager
@@ -183,13 +183,13 @@ private:
             nvimgcodecDecoderDestroy(cpu_decoder_);
             cpu_decoder_ = nullptr;
         }
-        
+
         if (decoder_)
         {
             nvimgcodecDecoderDestroy(decoder_);
             decoder_ = nullptr;
         }
-        
+
         if (instance_)
         {
             nvimgcodecInstanceDestroy(instance_);
@@ -208,4 +208,3 @@ private:
 #endif // CUCIM_HAS_NVIMGCODEC
 
 } // namespace cuslide2::nvimgcodec
-

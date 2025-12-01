@@ -18,7 +18,9 @@ def setup_environment():
 
     # Get current build directory
     repo_root = Path(__file__).parent.parent
-    plugin_lib = repo_root / "cpp" / "plugins" / "cucim.kit.cuslide2" / "build-release" / "lib"
+    plugin_lib = (
+        repo_root / "cpp" / "plugins" / "cucim.kit.cuslide2" / "build-release" / "lib"
+    )
 
     if not plugin_lib.exists():
         plugin_lib = repo_root / "install" / "lib"

@@ -42,7 +42,7 @@ typedef void* nvimgcodecCodeStream_t;
  * @param output_buffer Pointer to receive allocated buffer (caller must free)
  * @param out_device Output device ("cpu" or "cuda")
  * @return true if successful, false otherwise
- * 
+ *
  * @note When CUCIM_HAS_NVIMGCODEC is false, this function throws a runtime error.
  */
 bool decode_ifd_region_nvimgcodec(const IfdInfo& ifd_info,
