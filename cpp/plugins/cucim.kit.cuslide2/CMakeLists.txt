@@ -48,6 +48,9 @@ if (NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
     set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS "Debug" "Release" "MinSizeRel" "RelWithDebInfo")
 endif ()
 
+# nvImageCodec dynamic loading option (for Python wheels)
+option(WITH_DYNAMIC_NVIMGCODEC "Use dynamic loading for nvImageCodec (dlopen at runtime)" ON)
+
 # Set default output directories
 if (NOT CMAKE_ARCHIVE_OUTPUT_DIRECTORY)
     set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/lib")
@@ -206,21 +209,69 @@ target_link_libraries(${CUCIM_PLUGIN_NAME}
             deps::json
         )
 
-# Conditionally link nvImageCodec if available
-if(TARGET deps::nvimgcodec)
-    get_target_property(NVIMGCODEC_LOCATION deps::nvimgcodec IMPORTED_LOCATION)
-    get_target_property(NVIMGCODEC_INTERFACE_LINK deps::nvimgcodec INTERFACE_LINK_LIBRARIES)
+# nvImageCodec linking: dynamic (runtime) vs static (compile-time)
+if(WITH_DYNAMIC_NVIMGCODEC)
+    # Dynamic loading approach (for Python wheels) - based on DALI
+    # See: https://github.com/NVIDIA/DALI/tree/main/dali/nvimgcodec
+    message(STATUS "============== Dynamic nvImageCodec Loading ==============")
 
-    # Check if it's a real target (has location or interface links) vs dummy target
-    if(NVIMGCODEC_LOCATION OR NVIMGCODEC_INTERFACE_LINK OR TARGET nvimgcodec::nvimgcodec)
-        target_link_libraries(${CUCIM_PLUGIN_NAME} PRIVATE deps::nvimgcodec)
-        target_compile_definitions(${CUCIM_PLUGIN_NAME} PRIVATE CUCIM_HAS_NVIMGCODEC)
-        message(STATUS "✓ nvImageCodec enabled - GPU-accelerated JPEG/JPEG2000 decoding available")
-    else()
-        message(STATUS "⚠ nvImageCodec target exists but is dummy - GPU acceleration disabled")
-    endif()
+    # Create dynamic loading wrapper library using Joaquin's implementation
+    # Source files from src/nvimgcodec_dynlink/:
+    #   - nvimgcodec_wrap.cc (wrapper with dlopen)
+    #   - dynlink_nvimgcodec_gen.cc (auto-generated function stubs)
+    #   - nvimgcodec.h (local nvImageCodec header for API reference)
+    #   - nvimgcodec_version.h (version macros)
+    set(nvimgcodec_INCLUDE_DIR ${CMAKE_CURRENT_LIST_DIR}/src/nvimgcodec_dynlink)
+    include_directories(AFTER SYSTEM "${nvimgcodec_INCLUDE_DIR}")
+
+    add_library(nvimgcodec_dynlink STATIC
+        src/nvimgcodec_dynlink/nvimgcodec_wrap.cc
+        src/nvimgcodec_dynlink/dynlink_nvimgcodec_gen.cc
+    )
+    set_target_properties(nvimgcodec_dynlink PROPERTIES POSITION_INDEPENDENT_CODE ON)
+    target_include_directories(nvimgcodec_dynlink SYSTEM PRIVATE
+        ${nvimgcodec_INCLUDE_DIR}
+        ${CUDAToolkit_INCLUDE_DIRS}
+    )
+    target_link_libraries(nvimgcodec_dynlink PRIVATE ${CMAKE_DL_LIBS})
+
+    # Link cuslide2 against dynlink wrapper (instead of libnvimgcodec.so)
+    target_link_libraries(${CUCIM_PLUGIN_NAME} PRIVATE nvimgcodec_dynlink)
+    target_compile_definitions(${CUCIM_PLUGIN_NAME} PRIVATE CUCIM_HAS_NVIMGCODEC WITH_DYNAMIC_NVIMGCODEC)
+
+    # Set rpath for runtime library search (DALI/Joaquin's approach)
+    # Makes the .so automatically search for libnvimgcodec.so in these locations
+    foreach(rpath IN ITEMS
+        "$ORIGIN"
+        "$ORIGIN/../nvimgcodec"
+        "$ORIGIN/../lib"
+        "$ORIGIN/../../lib")
+        message(STATUS "  Adding to rpath: ${rpath}")
+        list(APPEND CMAKE_BUILD_RPATH ${rpath})
+        list(APPEND CMAKE_INSTALL_RPATH ${rpath})
+    endforeach()
+
+    message(STATUS "✓ Dynamic nvImageCodec loading enabled")
+    message(STATUS "  Runtime: libnvimgcodec.so loaded via dlopen")
+    message(STATUS "  Python wheels: Place libnvimgcodec.so in lib/ directory")
+    message(STATUS "==========================================================")
 else()
-    message(STATUS "⚠ nvImageCodec target not found - GPU acceleration disabled")
+    # Static linking: link directly against nvImageCodec (build-time dependency)
+    if(TARGET deps::nvimgcodec)
+        get_target_property(NVIMGCODEC_LOCATION deps::nvimgcodec IMPORTED_LOCATION)
+        get_target_property(NVIMGCODEC_INTERFACE_LINK deps::nvimgcodec INTERFACE_LINK_LIBRARIES)
+
+        # Check if it's a real target (has location or interface links) vs dummy target
+        if(NVIMGCODEC_LOCATION OR NVIMGCODEC_INTERFACE_LINK OR TARGET nvimgcodec::nvimgcodec)
+            target_link_libraries(${CUCIM_PLUGIN_NAME} PRIVATE deps::nvimgcodec)
+            target_compile_definitions(${CUCIM_PLUGIN_NAME} PRIVATE CUCIM_HAS_NVIMGCODEC)
+            message(STATUS "✓ nvImageCodec enabled (static linking) - GPU-accelerated decoding available")
+        else()
+            message(STATUS "⚠ nvImageCodec target exists but is dummy - GPU acceleration disabled")
+        endif()
+    else()
+        message(STATUS "⚠ nvImageCodec target not found - GPU acceleration disabled")
+    endif()
 endif()
 if (TARGET CUDA::nvjpeg_static)
         target_link_libraries(${CUCIM_PLUGIN_NAME}

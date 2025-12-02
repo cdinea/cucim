@@ -25,11 +25,18 @@ def setup_environment():
     if not plugin_lib.exists():
         plugin_lib = repo_root / "install" / "lib"
 
+    # Read version from VERSION file
+    version_file = repo_root / "VERSION"
+    if version_file.exists():
+        version = version_file.read_text().strip()
+    else:
+        version = "25.12.00"  # Fallback version
+
     # Create plugin configuration
     config = {
         "plugin": {
             "names": [
-                "cucim.kit.cuslide2@26.02.00.so",  # Try cuslide2 first
+                f"cucim.kit.cuslide2@{version}.so",  # Dynamically use current version
             ]
         }
     }
